@@ -1,56 +1,122 @@
 pipeline {
     agent any
 
-     stages {
+    stages {
+
         stage('Get Code') {
             steps {
-                // Obtener código del repo
-                git 'https://github.com/anieto-unir/helloworld.git'
+                git 'https://github.com/briss/unir_devops-cloud_cp1.git'
+                stash name: 'code', includes: '**'
             }
         }
 
-    stage('Build') {
-        steps {
-            echo 'Eyyyy, esto es Python. No hay que compilar nada!!!'
-	    echo WORKSPACE
-	    bat 'dir'
-        }
-    }
-
-    stage('Tests')
-    {
-        parallel {
-
-            stage('Unit') {
-                steps {
-                    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                        bat '''
-                                set PYTHONPATH=%WORKSPACE%
-                                pytest --junitxml=result-unit.xml test\\unit
-                        '''
-                    }
+        stage('Unit Tests') {
+            environment {
+                PYTHONPATH = "$WORKSPACE"
+            }
+            steps {
+                unstash name: 'code'
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    sh '''
+                        coverage run --branch --source=app --omit=app/__init__.py,app/api.py -m pytest --junitxml=result-unit.xml test/unit
+                        coverage xml
+                    '''
+                }
+                junit 'result-unit.xml'
+                recordCoverage(
+                    tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']],
+                    qualityGates: [
+                        [integerThreshold: 85, threshold: 85.0, metric: 'LINE', baseline: 'PROJECT', criticality: 'ERROR'],
+                        [integerThreshold: 95, threshold: 95.0, metric: 'LINE', baseline: 'PROJECT'],
+                        [integerThreshold: 80, threshold: 80.0, metric: 'BRANCH', baseline: 'PROJECT', criticality: 'ERROR'],
+                        [integerThreshold: 90, threshold: 90.0, metric: 'BRANCH', baseline: 'PROJECT'],
+                    ]
+                )
+            }
+            post {
+                always {
+                    deleteDir()
                 }
             }
-            
-            stage('Rest') {
-                steps {
-                    bat '''
-                        set FLASK_APP=app\\api.py
-                        set FLASK_ENV=development
-                        start flask run
-                        start java -jar C:\\Unir\\Ejercicios\\wiremock\\wiremock-jre8-standalone-2.28.0.jar --port 9090 --root-dir test\\wiremock
-                        set PYTHONPATH=%WORKSPACE%
-                        pytest --junitxml=result-rest.xml test\\rest
+        }
+
+        stage('Rest Tests') {
+            environment {
+                PYTHONPATH = "$WORKSPACE"
+            }
+            steps {
+                unstash name: 'code'
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    sh '''
+                        flask --app app/api.py --debug run &
+                        sleep 2
+                        pytest --junitxml=result-rest.xml test/rest
                     '''
-                }    
-            }    
+                }
+                junit 'result-rest.xml'
+            }
+            post {
+                always {
+                    deleteDir()
+                }
+            }
+        }
+
+        stage('Static Test') {
+            steps {
+                unstash name: 'code'
+                sh 'flake8 --format=pylint --exit-zero app > flake8.out'
+                recordIssues(
+                    tools:[flake8(name: 'Flake8', pattern: 'flake8.out')],
+                    qualityGates: [
+                        [threshold: 8, type: 'TOTAL', unstable: true],
+                        [threshold: 10, type: 'TOTAL', unstable: false]
+                    ]
+                )
+            }
+            post {
+                always {
+                    deleteDir()
+                }
+            }
+        }
+
+        stage('Security Test') {
+            steps {
+                unstash name: 'code'
+                sh 'bandit --exit-zero -r . -f custom -o bandit.out --msg-template "{abspath}:{line}: [{test_id}({severity})] {msg}"'
+                recordIssues(
+                    tools:[pyLint(name: 'Bandit', pattern: 'bandit.out')],
+                    qualityGates: [
+                        [threshold: 2, type: 'TOTAL', unstable: true],
+                        [threshold: 4, type: 'TOTAL', unstable: false]
+                    ]
+                )
+            }
+            post {
+                always {
+                    deleteDir()
+                }
+            }
+        }
+
+        stage('Performance Test') {
+            steps {
+                unstash name: 'code'
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    sh '''
+                        flask --app app/api.py --debug run &
+                        sleep 2
+                        jmeter -n -t test/jmeter/calculadora.jmx -f -l calculadora.jtl
+                    '''
+                    performanceReport sourceDataFiles: 'calculadora.jtl'
+                }
+            }
+            post {
+                always {
+                    deleteDir()
+                }
+            }
         }
     }
-    
-    stage ('Results') {
-        steps {
-            junit 'result*.xml'
-        }
-    }
-  }
 }
