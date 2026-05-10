@@ -107,9 +107,9 @@ pipeline {
                     sh '''
                         flask --app app/api.py --debug run &
                         sleep 2
-                        jmeter -n -t test/jmeter/calculadora.jmx -f -l calculadora.jtl
+                        jmeter -n -t test/jmeter/flask.jmx -f -l flask.jtl
                     '''
-                    performanceReport sourceDataFiles: 'calculadora.jtl'
+                    performanceReport sourceDataFiles: 'flask.jtl'
                 }
             }
             post {
