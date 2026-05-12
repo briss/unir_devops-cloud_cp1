@@ -5,7 +5,7 @@ pipeline {
 
         stage('Get Code') {
             steps {
-                git scm
+                checkout scm
                 stash name: 'code', includes: '**'
             }
         }
