@@ -5,7 +5,7 @@ pipeline {
 
         stage('Get Code') {
             steps {
-                git 'https://github.com/briss/unir_devops-cloud_cp1.git'
+                git scm
                 stash name: 'code', includes: '**'
             }
         }
